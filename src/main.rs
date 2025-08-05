@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::{
     env::home_dir,
-    fs::{self, write},
+    fs::{self, read_to_string, write},
     io::{self, Write},
     path::Path,
     process::exit,
@@ -25,7 +25,7 @@ struct Task {
     priority: Priority,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tasks_dir: String = match home_dir() {
         Some(path) => path.display().to_string() + TASKS_DIR,
         None => TASKS_DIR.to_string(),
@@ -33,8 +33,10 @@ fn main() {
     let tasks_dir_clone = tasks_dir.clone();
 
     // set up arc-mutex to share with ctrlc exit handler
-    let tasks = Arc::new(Mutex::new(Vec::<Task>::new()));
-    let tasks_clone = Arc::clone(&tasks);
+    let tasks_init = load(&tasks_dir)?;
+    println!("Loaded tasks: {:?}", tasks_init);
+    let tasks_arc = Arc::new(Mutex::new(tasks_init));
+    let tasks_clone = Arc::clone(&tasks_arc);
 
     let mut name = String::new();
     let mut deadline = String::new();
@@ -63,8 +65,10 @@ fn main() {
     };
 
     println!("{:?}", test_task);
-    tasks.lock().unwrap().push(test_task);
-    let _ = save(&tasks, &tasks_dir);
+    tasks_arc.lock().unwrap().push(test_task);
+    let _ = save(&tasks_arc, &tasks_dir);
+
+    Ok(())
 }
 
 // get unix timestamp of the given date in the local time zone
@@ -101,7 +105,7 @@ fn timestamp_from_date(deadline: String) -> u64 {
     deadline_timestamp as u64
 }
 
-fn save(arc: &Arc<Mutex<Vec<Task>>>, path: &str) -> std::io::Result<()> {
+fn save(arc: &Arc<Mutex<Vec<Task>>>, path: &str) -> io::Result<()> {
     let guard = arc.lock().unwrap();
     let data = &serde_json::to_string(&*guard).unwrap();
     match write(path, data) {
@@ -122,4 +126,10 @@ fn save(arc: &Arc<Mutex<Vec<Task>>>, path: &str) -> std::io::Result<()> {
     }
     println!("Saved tasks");
     Ok(())
+}
+
+fn load(path: &str) -> io::Result<Vec<Task>> {
+    let data = read_to_string(path).unwrap(); 
+    let deserialised = serde_json::from_str::<Vec<Task>>(&data)?;
+    Ok(deserialised)
 }
